@@ -12,13 +12,16 @@ my $sawmill_port = '443';             # default port
 my $sawmill_user = 'admin';           # default for BOSH lite
 my $sawmill_pass = 'admin';           # default for BOSH lite
 my $sawmill_timeout = '60';           # default timeout is 60s
+my %filters;
+my $grep = '';
 
 GetOptions("nossl"      => \$nossl,
            "host=s"     => \$sawmill_ip,
            "port=s"     => \$sawmill_port,
            "user=s"     => \$sawmill_user,
            "pass=s"     => \$sawmill_pass,
-           "timeout=s"  => \$sawmill_timeout)
+           "timeout=s"  => \$sawmill_timeout,
+           "filter=s%"  => \%filters,)
 or die("Error in command line arguments\n");
 
 my $sawmill_url = "https://$sawmill_ip:$sawmill_port";
@@ -34,9 +37,15 @@ if ($nossl) {
 
 print "Targeting sawmill at '$sawmill_url'. $sslmsg\n\nDepending on your configuration it may take a moment for log\nmessages to appear. Please be patient.\n\n";
 
+if (%filters) {
+  while(my ($key, $val) = each %filters){
+    $grep = "$grep | grep \'$key=\"$val\"\'";
+  }
+}
+print "$curl $grep\n\n";
 my $logs;
 $| = 1;                               # using pipe mode -> turns off buffering
-my $pid = open2($logs, undef, "$curl") or die "Command `curl' does not exist.\n.Recommend installing `curl'.\n";
+my $pid = open2($logs, undef, "$curl $grep") or die "Command `curl' does not exist.\n.Recommend installing `curl'.\n";
 
 while (<$logs>) {
     print;
