@@ -143,7 +143,9 @@ real, verifiable certificates in production environments.
 
 =head1 AUTHOR
 
-Written by Quintessence.
+Written by James Hunt B<jhunt@starkandwayne.com>
+and Quintessence <quinn@starkandwayne.com>, after much wailing
+and gnashing of teeth.
 
 =back
 
