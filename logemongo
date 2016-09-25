@@ -1,0 +1,149 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use Getopt::Long qw/:config bundling/;
+use IO::Handle ();
+use IO::Socket::SSL qw/$SSL_ERROR/;
+use Pod::Usage qw/pod2usage/;
+use MIME::Base64 qw/encode_base64/;
+
+my %OPTIONS = (
+	ssl      => 1,
+	host     => '10.244.73.2',
+	port     => 443,
+	username => 'admin',
+	password => 'admin',
+	filter   => [],
+);
+
+GetOptions(\%OPTIONS, qw/
+	ssl!
+	help|h
+	host|H=s
+	port|P=i
+	username|user|u=s
+	password|pass|p=s
+	filter|f=s@
+/) or pod2usage(2);
+pod2usage(1) if $OPTIONS{help};
+
+# compile all the regexen for SPEED!
+my @FILTERS = map { qr/$_/ } @{$OPTIONS{filter}};
+my $URL = "https://$OPTIONS{host}:$OPTIONS{port}/ws";
+
+print "Targeting sawmill at '$URL'.\n\nDepending on your configuration it may take a moment for log\nmessages to appear. Please be patient.\n\n";
+
+my $fd = IO::Socket::SSL->new(
+	PeerHost => $OPTIONS{host},
+	PeerPort => $OPTIONS{port},
+	($OPTIONS{ssl} ? () : (SSL_verify_callback => sub { 1 })),
+) or die "error=$!, ssl_error=$SSL_ERROR";
+$fd->blocking(0); # make it O_NONBLOCK
+
+my $creds = encode_base64("$OPTIONS{username}:$OPTIONS{password}");
+
+print $fd <<EOF;
+GET /ws HTTP/1.1
+Host: $OPTIONS{host}
+User-Agent: qgj-web/1.0
+Accept: */*
+Authorization: Basic $creds
+
+EOF
+
+print "entering main event loop\n";
+my $streaming = undef;
+
+message:
+while (1) {
+	my ($n, $buf);
+	$n = sysread($fd, $buf, 8192);
+	if (defined $n) {
+		again:
+		if (!$streaming) {
+			# grab the HTTP response code from the first message.
+			if ($buf =~ m{HTTP/(.*) (\d{3})}) {
+				my $status = $2;
+				if ($status != 200) {
+					print $buf;
+					die "bad response from $OPTIONS{host}:$OPTIONS{port}\n";
+				}
+				$buf =~ s/.*\r\n\r\n//s;
+				$streaming = 1;
+				goto again;
+
+			} else {
+				print $buf;
+				die "bad response from $OPTIONS{host}:$OPTIONS{port}\n";
+			}
+		}
+		my ($len, $msg) = split "\r\n", $buf;
+
+		if (@FILTERS) {
+			for my $re (@FILTERS) {
+				goto g2g if $msg =~ $re;
+			}
+			next message;
+		}
+	g2g:
+		print "[$len] $msg";
+
+	} elsif ($!{EAGAIN}) {
+		sleep 1;
+		next;
+
+	} else {
+		die "ERROR\n";
+	}
+}
+
+=head1 NAME
+
+logemongo - A Sawmill Client
+
+=head1 SYNOPSIS
+
+logemongo -H C<host> -P C<port> -u C<user> -p C<password>
+
+=head1 OPTIONS
+
+C<logemongo> understands the following options:
+
+=over
+
+=item B<-H>, B<--host> I<NAME>
+
+The hostname or IP address of the Sawmill endpoint to connect to.
+This defaults to 10.244.73.2, which is only valid in BOSH-lite
+deployments, usually.
+
+=item B<-P>, B<--port> I<PORT>
+
+The TCP port to connect to Sawmill on.  Defaults to 443, which
+should be sufficient for most deployment scenarios.
+
+=item B<-u>, B<--user> I<NAME>
+
+The username to connect to Sawmill as.  Defaults to C<admin>, which
+hopefully doesn't actually work in your production deployments.
+
+=item B<-p>, B<--pass> I<NAME>
+
+The password to connect to Sawmill as.  Defaults to C<admin>, which
+hopefully doesn't actually work in your production deployments.
+
+=item B<--[no-]ssl>
+
+Enable (disable) SSL certificate verification.  The BOSH-lite
+deployment utilizes self-signed certificates, so you may need
+C<--no-ssl> to access it.  You are strongly encouraged to use
+real, verifiable certificates in production environments.
+
+=head1 AUTHOR
+
+Written by Quintessence.
+
+=back
+
