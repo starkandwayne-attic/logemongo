@@ -15,7 +15,10 @@ my %OPTIONS = (
 	port     => 443,
 	username => 'admin',
 	password => 'admin',
-	filter   => [],
+	include  => [],
+	exclude  => [],
+	debug    => 0,
+	count    => 0,
 );
 
 GetOptions(\%OPTIONS, qw/
@@ -25,12 +28,22 @@ GetOptions(\%OPTIONS, qw/
 	port|P=i
 	username|user|u=s
 	password|pass|p=s
-	filter|f=s@
+	include|i=s@
+	exclude|x=s@
+	debug|D!
+	count|c=i
 /) or pod2usage(2);
 pod2usage(1) if $OPTIONS{help};
 
+sub DEBUG {
+	$OPTIONS{debug} ? print "[DEBUG] @_\n" : print "";
+	return;
+}
+
 # compile all the regexen for SPEED!
-my @FILTERS = map { qr/$_/ } @{$OPTIONS{filter}};
+my @INCLUDES = map { qr/$_/ } @{$OPTIONS{include}};
+my @EXCLUDES = map { qr/$_/ } @{$OPTIONS{exclude}};
+
 my $URL = "https://$OPTIONS{host}:$OPTIONS{port}/ws";
 
 print "Targeting sawmill at '$URL'.\n\nDepending on your configuration it may take a moment for log\nmessages to appear. Please be patient.\n\n";
@@ -53,11 +66,12 @@ Authorization: Basic $creds
 
 EOF
 
-print "entering main event loop\n";
-my $streaming = undef;
+DEBUG "Sent GET request to $OPTIONS{host}";
 
+my $streaming = undef;
+my $counter = 1;
 message:
-while (1) {
+while ($OPTIONS{count} ? $counter <= $OPTIONS{count} : 1) {
 	my ($n, $buf);
 	$n = sysread($fd, $buf, 8192);
 	if (defined $n) {
@@ -65,6 +79,7 @@ while (1) {
 		if (!$streaming) {
 			# grab the HTTP response code from the first message.
 			if ($buf =~ m{HTTP/(.*) (\d{3})}) {
+				DEBUG "Received response from $OPTIONS{host}:\n$buf\n";
 				my $status = $2;
 				if ($status != 200) {
 					print $buf;
@@ -81,14 +96,21 @@ while (1) {
 		}
 		my ($len, $msg) = split "\r\n", $buf;
 
-		if (@FILTERS) {
-			for my $re (@FILTERS) {
+		if (@INCLUDES) {
+			for my $re (@INCLUDES) {
 				goto g2g if $msg =~ $re;
 			}
 			next message;
 		}
+		if (@EXCLUDES) {
+			for my $re (@EXCLUDES) {
+				goto g2g if $msg !~ $re;
+			}
+			next message;
+		}
 	g2g:
-		print "[$len] $msg";
+		print "$msg\n";
+		$counter++;
 
 	} elsif ($!{EAGAIN}) {
 		sleep 1;
@@ -141,6 +163,28 @@ deployment utilizes self-signed certificates, so you may need
 C<--no-ssl> to access it.  You are strongly encouraged to use
 real, verifiable certificates in production environments.
 
+=item B<-c>, B<--count> I<VALUE>
+
+Limits the number of log messages returned to the value provided.
+If no value is provided, messages are streamed until the user
+exits.
+
+=item B<-i>, B<--include> I<REGEX>
+
+Returns only messages that match the provided pattern. If no pattern
+is provided, all messages are returned.
+
+=item B<-x>, B<--exclude> I<REGEX>
+
+Returns only messages that do not match the provided pattern. If no pattern
+is provided, all messages are returned.
+
+=item B<-D>, B<--debug>
+
+Prints additional debugging information to assist with troubleshooting
+in the event logemongo is not receiving messages from a Sawmill for
+whatever reason.
+
 =head1 AUTHOR
 
 Written by James Hunt B<jhunt@starkandwayne.com>
@@ -148,4 +192,3 @@ and Quintessence <quinn@starkandwayne.com>, after much wailing
 and gnashing of teeth.
 
 =back
-
