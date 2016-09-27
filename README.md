@@ -1,2 +1,2 @@
 # logemongo
-Websocket client for Sawmill BOSH release.
+CLI for Sawmill BOSH release.
