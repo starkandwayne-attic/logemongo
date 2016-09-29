@@ -5,11 +5,14 @@ TODO
    * bosh_deployment | deployment
    * bosh_job_name   | job_name
    * bosh_job_index  | job_index
-- Support `--include` / `-i`  and `--exclude` / `-x` instead of
-  `--filter`, to have more granular control over the log stream
+   * `--filter` should only be on these fields ^
+- Support `--include` / `-i`  and `--exclude` / `-x` to have more granular
+  control over the log stream (should only apply to the payload,
+  i.e. `[NXLOG@ ...] {PAYLOAD}`)
 - Implement a heartbeat logger server-side, and be able to detect
   when we are actually losing data from Sawmill, vs. not having
   anything useful to say.
+  * Could add `--heartbeat` flag to show heartbeat msgs, otherwise msgs suppressed.
 - Implement a `--debug` / `-D` flag for printing out additional
   debugging
 - Implement a `--trace` / `-T` flag that turns on `-D` but also
