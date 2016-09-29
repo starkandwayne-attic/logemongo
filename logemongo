@@ -9,7 +9,7 @@ use IO::Handle ();
 use IO::Socket::SSL qw/$SSL_ERROR/;
 use Pod::Usage qw/pod2usage/;
 use MIME::Base64 qw/encode_base64/;
-use YAML qw(Dump Bless);
+use YAML qw(Dump);
 
 my %OPTIONS = (
 	ssl      => 1,
@@ -106,6 +106,8 @@ while ($OPTIONS{count} ? $counter <= $OPTIONS{count} : 1) {
 		if ($msg =~ m/(\[NXLOG@\d+(.*)\]) (.*)/) {
 			$logdata = $2;
 			$payload = $3;
+		} else {
+			next message;
 		}
 		my @time_uuid = split ' ', $msg;
 		($msghash{'timestamp'}, $msghash{'uuid'}) =  ($time_uuid[0], $time_uuid[1]);
@@ -124,12 +126,11 @@ while ($OPTIONS{count} ? $counter <= $OPTIONS{count} : 1) {
 		}
 		if (@EXCLUDES) {
 			for my $re (@EXCLUDES) {
-				goto g2g if $payload !~ $re;
+				next message if $payload =~ $re;
 			}
-			next message;
 		}
 		if ($OPTIONS{filters}) {
-			while (my ($key, $val) = each %{$OPTIONS{filters}}) {
+			for my $key (keys %{$OPTIONS{filters}}) {
 				goto g2g if $OPTIONS{filters}{$key} eq $msghash{$key};
 			}
 			next message;
