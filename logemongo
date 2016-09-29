@@ -3,11 +3,13 @@
 use strict;
 use warnings;
 
+use Data::Dumper;
 use Getopt::Long qw/:config bundling/;
 use IO::Handle ();
 use IO::Socket::SSL qw/$SSL_ERROR/;
 use Pod::Usage qw/pod2usage/;
 use MIME::Base64 qw/encode_base64/;
+use YAML qw(Dump Bless);
 
 my %OPTIONS = (
 	ssl      => 1,
@@ -17,8 +19,10 @@ my %OPTIONS = (
 	password => 'admin',
 	include  => [],
 	exclude  => [],
+	filter   => [],
 	debug    => 0,
 	count    => 0,
+	detail => 0,
 );
 
 GetOptions(\%OPTIONS, qw/
@@ -30,8 +34,10 @@ GetOptions(\%OPTIONS, qw/
 	password|pass|p=s
 	include|i=s@
 	exclude|x=s@
+	filters|filter=s%
 	debug|D!
 	count|c=i
+	detail!
 /) or pod2usage(2);
 pod2usage(1) if $OPTIONS{help};
 
@@ -96,20 +102,40 @@ while ($OPTIONS{count} ? $counter <= $OPTIONS{count} : 1) {
 		}
 		my ($len, $msg) = split "\r\n", $buf;
 
+		my ($logdata, $payload, %msghash);
+		if ($msg =~ m/(\[NXLOG@\d+(.*)\]) (.*)/) {
+			$logdata = $2;
+			$payload = $3;
+		}
+		my @time_uuid = split ' ', $msg;
+		($msghash{'timestamp'}, $msghash{'uuid'}) =  ($time_uuid[0], $time_uuid[1]);
+		my $qr = qr/\s*([^=,\s]+)\s*=\s*(?:"((?:[^"]|"")*)"|([^,"]*))\s*,?/;
+		while ($logdata =~ m/$qr/) {
+			$msghash{$1}=$2;
+			$logdata =~ s/$qr//;
+		}
+		$msghash{'payload'} = $payload;
+
 		if (@INCLUDES) {
 			for my $re (@INCLUDES) {
-				goto g2g if $msg =~ $re;
+				goto g2g if $payload =~ $re;
 			}
 			next message;
 		}
 		if (@EXCLUDES) {
 			for my $re (@EXCLUDES) {
-				goto g2g if $msg !~ $re;
+				goto g2g if $payload !~ $re;
+			}
+			next message;
+		}
+		if ($OPTIONS{filters}) {
+			while (my ($key, $val) = each %{$OPTIONS{filters}}) {
+				goto g2g if $OPTIONS{filters}{$key} eq $msghash{$key};
 			}
 			next message;
 		}
 	g2g:
-		print "$msg\n";
+		$OPTIONS{detail} ? print Dump(\%msghash), "\n" : print "$msg\n";
 		$counter++;
 
 	} elsif ($!{EAGAIN}) {
