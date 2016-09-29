@@ -22,7 +22,7 @@ my %OPTIONS = (
 	filter   => [],
 	debug    => 0,
 	count    => 0,
-	detail => 0,
+	detail   => 0,
 );
 
 GetOptions(\%OPTIONS, qw/
@@ -109,8 +109,7 @@ while ($OPTIONS{count} ? $counter <= $OPTIONS{count} : 1) {
 		} else {
 			next message;
 		}
-		my @time_uuid = split ' ', $msg;
-		($msghash{'timestamp'}, $msghash{'uuid'}) =  ($time_uuid[0], $time_uuid[1]);
+		($msghash{'timestamp'}, $msghash{'uuid'}) =  split ' ', $msg;
 		my $qr = qr/\s*([^=,\s]+)\s*=\s*(?:"((?:[^"]|"")*)"|([^,"]*))\s*,?/;
 		while ($logdata =~ m/$qr/) {
 			$msghash{$1}=$2;
