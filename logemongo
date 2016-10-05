@@ -4,6 +4,7 @@ use strict;
 use warnings;
 
 use Data::Dumper;
+use Env qw(LOGEMONGO_TEST);
 use Getopt::Long qw/:config bundling/;
 use IO::Handle ();
 use IO::Socket::SSL qw/$SSL_ERROR/;
@@ -41,18 +42,77 @@ GetOptions(\%OPTIONS, qw/
 /) or pod2usage(2);
 pod2usage(1) if $OPTIONS{help};
 
+# compile all the regexen for SPEED!
+my @INCLUDES = map { qr/$_/ } @{$OPTIONS{include}};
+my @EXCLUDES = map { qr/$_/ } @{$OPTIONS{exclude}};
+
 sub DEBUG {
 	$OPTIONS{debug} ? print "[DEBUG] @_\n" : print "";
 	return;
 }
 
-# compile all the regexen for SPEED!
-my @INCLUDES = map { qr/$_/ } @{$OPTIONS{include}};
-my @EXCLUDES = map { qr/$_/ } @{$OPTIONS{exclude}};
+sub handle {
+	my ($message) = @_;
+	my ($log, $payload, %msgfield);
+	if ($message =~ m/(\[NXLOG@\d+(.*)\]) (.*)/) {
+		$log = $2;
+		$payload = $3;
+	} else {
+		return 0;
+	}
+	($msgfield{timestamp}, $msgfield{uuid}) =  split ' ', $message;
 
-my $URL = "https://$OPTIONS{host}:$OPTIONS{port}/ws";
+	while ($log =~ s/(\w*?)="(.*?)"//) {
+		$msgfield{$1} = $2;
+	}
 
-print "Targeting sawmill at '$URL'.\n\nDepending on your configuration it may take a moment for log\nmessages to appear. Please be patient.\n\n";
+	$msgfield{payload} = $payload;
+
+	if (@INCLUDES) {
+		for my $re (@INCLUDES) {
+			if ($payload =~ $re) {
+				$OPTIONS{detail} ? print Dump(\%msgfield), "\n" : print "$message\n";
+				return 1;
+			}
+		}
+		return 0;
+	}
+	if (@EXCLUDES) {
+		for my $re (@EXCLUDES) {
+			if ($payload =~ $re) {
+				return 0;
+			}
+		}
+		$OPTIONS{detail} ? print Dump(\%msgfield), "\n" : print "$message\n";
+		return 1;
+	}
+	if ($OPTIONS{filters}) {
+		for my $key (keys %{$OPTIONS{filters}}) {
+			if ($OPTIONS{filters}{$key} eq $msgfield{$key}) {
+				$OPTIONS{detail} ? print Dump(\%msgfield), "\n" : print "$message\n";
+				return 1;
+			}
+		}
+		return 0;
+	}
+	$OPTIONS{detail} ? print Dump(\%msgfield), "\n" : print "$message\n";
+	return 1;
+}
+
+if ($LOGEMONGO_TEST) {
+	print "Testing with test log file.\n";
+	my $fh;
+	open($fh, '<:encoding(UTF-8)', 'test.log') or die "Could not open log file 'test.log': $!\n";
+	my $counter = 1;
+	testmsg:
+	while (my $msg = <$fh>) {
+		handle $msg or next;
+		last if $OPTIONS{count} && $counter++ == $OPTIONS{count};
+	}
+	exit 0;
+}
+
+print "Targeting sawmill at 'https://$OPTIONS{host}:$OPTIONS{port}'.\n\nDepending on your configuration it may take a moment for log\nmessages to appear. Please be patient.\n\n";
 
 my $fd = IO::Socket::SSL->new(
 	PeerHost => $OPTIONS{host},
@@ -69,7 +129,6 @@ Host: $OPTIONS{host}
 User-Agent: qgj-web/1.0
 Accept: */*
 Authorization: Basic $creds
-
 EOF
 
 DEBUG "Sent GET request to $OPTIONS{host}";
@@ -78,7 +137,7 @@ my $streaming = undef;
 my $counter = 1;
 message:
 while ($OPTIONS{count} ? $counter <= $OPTIONS{count} : 1) {
-	my ($n, $buf);
+	my ($n, $buf, $msg);
 	$n = sysread($fd, $buf, 8192);
 	if (defined $n) {
 		again:
@@ -100,42 +159,9 @@ while ($OPTIONS{count} ? $counter <= $OPTIONS{count} : 1) {
 				die "bad response from $OPTIONS{host}:$OPTIONS{port}\n";
 			}
 		}
-		my ($len, $msg) = split "\r\n", $buf;
+		(undef, $msg) = split "\r\n", $buf;
 
-		my ($logdata, $payload, %msghash);
-		if ($msg =~ m/(\[NXLOG@\d+(.*)\]) (.*)/) {
-			$logdata = $2;
-			$payload = $3;
-		} else {
-			next message;
-		}
-		($msghash{'timestamp'}, $msghash{'uuid'}) =  split ' ', $msg;
-		my $qr = qr/\s*([^=,\s]+)\s*=\s*(?:"((?:[^"]|"")*)"|([^,"]*))\s*,?/;
-		while ($logdata =~ m/$qr/) {
-			$msghash{$1}=$2;
-			$logdata =~ s/$qr//;
-		}
-		$msghash{'payload'} = $payload;
-
-		if (@INCLUDES) {
-			for my $re (@INCLUDES) {
-				goto g2g if $payload =~ $re;
-			}
-			next message;
-		}
-		if (@EXCLUDES) {
-			for my $re (@EXCLUDES) {
-				next message if $payload =~ $re;
-			}
-		}
-		if ($OPTIONS{filters}) {
-			for my $key (keys %{$OPTIONS{filters}}) {
-				goto g2g if $OPTIONS{filters}{$key} eq $msghash{$key};
-			}
-			next message;
-		}
-	g2g:
-		$OPTIONS{detail} ? print Dump(\%msghash), "\n" : print "$msg\n";
+		handle $msg or next;
 		$counter++;
 
 	} elsif ($!{EAGAIN}) {
