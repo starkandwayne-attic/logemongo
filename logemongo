@@ -62,9 +62,9 @@ sub handle {
 	}
 	($msgfield{timestamp}, $msgfield{uuid}) =  split ' ', $message;
 
-  while ($log =~ s/(\w*?)="(.*?)"//) {
+	while ($log =~ s/(\w*?)="(.*?)"//) {
 		$msgfield{$1} = $2;
-  }
+	}
 
 	$msgfield{payload} = $payload;
 
