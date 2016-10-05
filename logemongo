@@ -20,7 +20,6 @@ my %OPTIONS = (
 	password => 'admin',
 	include  => [],
 	exclude  => [],
-	filter   => [],
 	debug    => 0,
 	count    => 0,
 	detail   => 0,
@@ -53,25 +52,25 @@ sub DEBUG {
 
 sub handle {
 	my ($message) = @_;
-	my ($logdata, $payload, %msghash);
+	my ($log, $payload, %msgfield);
 	if ($message =~ m/(\[NXLOG@\d+(.*)\]) (.*)/) {
-		$logdata = $2;
+		$log = $2;
 		$payload = $3;
 	} else {
 		return 0;
 	}
-	($msghash{'timestamp'}, $msghash{'uuid'}) =  split ' ', $message;
-	my $qr = qr/\s*([^=,\s]+)\s*=\s*(?:"((?:[^"]|"")*)"|([^,"]*))\s*,?/;
-	while ($logdata =~ m/$qr/) {
-		$msghash{$1}=$2;
-		$logdata =~ s/$qr//;
-	}
-	$msghash{'payload'} = $payload;
+	($msgfield{timestamp}, $msgfield{uuid}) =  split ' ', $message;
+
+  while ($log =~ s/(\w*?)="(.*?)"//) {
+		$msgfield{$1} = $2;
+  }
+
+	$msgfield{payload} = $payload;
 
 	if (@INCLUDES) {
 		for my $re (@INCLUDES) {
 			if ($payload =~ $re) {
-				$OPTIONS{detail} ? print Dump(\%msghash), "\n" : print "$message\n";
+				$OPTIONS{detail} ? print Dump(\%msgfield), "\n" : print "$message\n";
 				return 1;
 			}
 		}
@@ -80,28 +79,27 @@ sub handle {
 	if (@EXCLUDES) {
 		for my $re (@EXCLUDES) {
 			if ($payload =~ $re) {
-				return 1;
+				return 0;
 			}
 		}
-		$OPTIONS{detail} ? print Dump(\%msghash), "\n" : print "$message\n";
-		return 0;
+		$OPTIONS{detail} ? print Dump(\%msgfield), "\n" : print "$message\n";
+		return 1;
 	}
 	if ($OPTIONS{filters}) {
 		for my $key (keys %{$OPTIONS{filters}}) {
-			if ($OPTIONS{filters}{$key} eq $msghash{$key}) {
-				$OPTIONS{detail} ? print Dump(\%msghash), "\n" : print "$message\n";
+			if ($OPTIONS{filters}{$key} eq $msgfield{$key}) {
+				$OPTIONS{detail} ? print Dump(\%msgfield), "\n" : print "$message\n";
 				return 1;
 			}
 		}
 		return 0;
 	}
+	$OPTIONS{detail} ? print Dump(\%msgfield), "\n" : print "$message\n";
+	return 1;
 }
 
-my $URL = "https://$OPTIONS{host}:$OPTIONS{port}/ws";
-
-$LOGEMONGO_TEST ? print "Testing with test log file.\n" : print "Targeting sawmill at '$URL'.\n\nDepending on your configuration it may take a moment for log\nmessages to appear. Please be patient.\n\n";
-
 if ($LOGEMONGO_TEST) {
+	print "Testing with test log file.\n";
 	my $fh;
 	open($fh, '<:encoding(UTF-8)', 'test.log') or die "Could not open log file 'test.log': $!\n";
 	my $counter = 1;
@@ -112,6 +110,8 @@ if ($LOGEMONGO_TEST) {
 	}
 	exit 0;
 }
+
+print "Targeting sawmill at 'https://$OPTIONS{host}:$OPTIONS{port}'.\n\nDepending on your configuration it may take a moment for log\nmessages to appear. Please be patient.\n\n";
 
 my $fd = IO::Socket::SSL->new(
 	PeerHost => $OPTIONS{host},
