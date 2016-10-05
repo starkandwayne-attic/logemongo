@@ -20,6 +20,7 @@ my %OPTIONS = (
 	password => 'admin',
 	include  => [],
 	exclude  => [],
+	filter   => [],
 	debug    => 0,
 	count    => 0,
 	detail   => 0,
